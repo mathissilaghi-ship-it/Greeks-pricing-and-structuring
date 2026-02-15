@@ -464,13 +464,29 @@ elif page == "Produit Structuré":
         st.plotly_chart(fig1, use_container_width=True)
 
     # --- Summary metrics ---
+    # Detect unbounded profit/loss analytically
+    # Net call exposure: sum of (sign * qty) for all call legs
+    # Net put exposure: sum of (sign * qty) for all put legs
+    net_calls = sum((1 if l["position"] == "Long" else -1) * l["qty"] for l in legs if l["type"] == "Call")
+    net_puts = sum((1 if l["position"] == "Long" else -1) * l["qty"] for l in legs if l["type"] == "Put")
+
+    # As S → ∞: net long calls = unlimited profit, net short calls = unlimited loss
+    # As S → 0: net long puts = profit capped by strikes, net short puts = loss capped by strikes
+    profit_unbounded = (net_calls > 0) or (net_puts < 0)   # long calls or short puts benefit from extremes
+    loss_unbounded = (net_calls < 0) or (net_puts > 0)     # short calls or long puts (loss if S→∞ for short calls)
+
+    # More precise: long calls → profit ∞ (S→∞), short calls → loss ∞ (S→∞)
+    # long puts → profit bounded (S→0, max = K), short puts → loss bounded (S→0, max = K)
+    profit_unbounded = net_calls > 0   # only net long calls give truly unlimited profit
+    loss_unbounded = net_calls < 0     # only net short calls give truly unlimited loss
+
     max_profit_payoff = max(combined_pnl)
     max_loss_payoff = min(combined_pnl)
+
     # Breakeven: where P&L crosses zero
     breakevens = []
     for j in range(len(S_range) - 1):
         if combined_pnl[j] * combined_pnl[j+1] < 0:
-            # Linear interpolation
             s_be = S_range[j] + (0 - combined_pnl[j]) * (S_range[j+1] - S_range[j]) / (combined_pnl[j+1] - combined_pnl[j])
             breakevens.append(round(s_be, 2))
 
@@ -478,10 +494,10 @@ elif page == "Produit Structuré":
     with m1:
         st.metric("Prime Nette", f"{total_premium:.2f}")
     with m2:
-        prof_str = f"{max_profit_payoff:.2f}" if max_profit_payoff < 1e6 else "∞"
+        prof_str = "∞" if profit_unbounded else f"{max_profit_payoff:.2f}"
         st.metric("Profit Max", prof_str)
     with m3:
-        loss_str = f"{max_loss_payoff:.2f}" if max_loss_payoff > -1e6 else "-∞"
+        loss_str = "-∞" if loss_unbounded else f"{max_loss_payoff:.2f}"
         st.metric("Perte Max", loss_str)
     with m4:
         be_str = " / ".join(str(b) for b in breakevens) if breakevens else "—"
